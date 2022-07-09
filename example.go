@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v44/github"
@@ -219,23 +220,33 @@ func (ghs *gitHubService) GetUserInfo(userName string) (*User, error) {
 
 func (ghs *gitHubService) GetUserRepositories(userName string) ([]*Repository, error) {
 
-	reposGH, _, err := ghs.client.Repositories.List(context.Background(), userName, nil)
+	repos, _, err := ghs.client.Repositories.List(context.Background(), userName, nil)
 
-	var repos []*Repository
+	var Repos []*Repository
 
-	for _, repo := range reposGH {
-		r, _ := ghs.GetRepositoryByName(userName, repo.GetName())
-		repos = append(repos, r)
+	for _, repo := range repos {
+		r := Repository{
+			Name:                repo.GetName(),
+			Description:         repo.GetDescription(),
+			Link:                repo.GetHTMLURL(),
+			IsPrivate:           repo.GetPrivate(),
+			StarsCount:          repo.GetStargazersCount(),
+			ForksCount:          repo.GetForksCount(),
+			LastUpdatedTime:     repo.GetUpdatedAt().Time,
+			programmingLanguage: getLanguages(repo, ghs),
+		}
+
+		Repos = append(Repos, &r)
 	}
 
-	return repos, err
+	return Repos, err
 }
 
 func (ghs *gitHubService) GetRepositoryByName(userName, repositoryName string) (*Repository, error) {
 	repo, _, err := ghs.client.Repositories.Get(context.Background(), userName, repositoryName)
 
 	rp := Repository{
-		Name:                repositoryName,
+		Name:                repo.GetName(),
 		Description:         repo.GetDescription(),
 		Link:                repo.GetHTMLURL(),
 		IsPrivate:           repo.GetPrivate(),
@@ -256,14 +267,21 @@ func (ghs *gitHubService) CreateRepository(repositoryName string) error { // sca
 }
 
 func (ghs *gitHubService) GetRepositoryBranches(owner string, repositoryName string) ([]*Branch, error) {
-	branches, _, err := ghs.client.Repositories.ListBranches(context.Background(), owner, repositoryName, nil) // jostanise иначе ВОЗВРАЩАЕТ ПУСТОТУ
+	branches, _, err := ghs.client.Repositories.ListBranches(context.Background(), owner, repositoryName, nil)
 
 	var Branches []*Branch
 
 	for _, branch := range branches {
+		commit := branch.GetCommit() // DOESN'T RETURN A GOOD COMMIT
+
+		// вырезаем SHA и по SHA ищем коммит
+		url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/", owner, repositoryName)
+		sha := strings.Replace(commit.GetURL(), url, "", 1)
+		goodCommit, _, _ := ghs.client.Git.GetCommit(context.Background(), owner, repositoryName, sha)
+
 		br := Branch{
 			Name:      *branch.Name,
-			UpdatedAt: branch.GetCommit().GetAuthor().GetUpdatedAt().Time, // Почему-то у main возвращает 0001-01-01 00:00:00 +0000 UTC
+			UpdatedAt: goodCommit.GetAuthor().GetDate(),
 		}
 		Branches = append(Branches, &br)
 	}
@@ -292,40 +310,51 @@ func (ghs *gitHubService) DeleteBranch(repoName, branchName string) error { // <
 	return fmt.Errorf("implement me")
 }
 
-func (ghs *gitHubService) GetBranchCommits(userName, repositoryName, branchName string) ([]*Commit, error) {
-	// Находим все branches и их SHA:
-	// https://api.github.com/repos/jostanise/rsa_encrypted_local_chat/branches
+func findParentsOfCommit(ghs *gitHubService, commit *github.Commit, userName string, repositoryName string) ([]*github.Commit, error) {
 
-	// Подставляем нужную branch, её SHA и получаем новый url:
-	// https://api.github.com/repos/jostanise/rsa_encrypted_local_chat/git/commits/0480a292df58ba0bb4851bf828ed25efc56da813
+	var Parents []*github.Commit
 
-	// Переходим по новому URL и повторяем, пока не закончатся parents:
-	// https://api.github.com/repos/jostanise/rsa_encrypted_local_chat/git/commits/432c8ec12893466d87d13f98139167ad08306cda
+	// вырезаем SHA и по SHA ищем коммит
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/commits/", userName, repositoryName)
+	sha := strings.Replace(commit.GetURL(), url, "", 1)
+	goodCommit, _, _ := ghs.client.Git.GetCommit(context.Background(), userName, repositoryName, sha)
 
-	br, _, err := ghs.client.Repositories.GetBranch(context.Background(), userName, repositoryName, branchName, true)
+	Parents = append(Parents, goodCommit)
 
-	// something := br.GetCommit().Commit.Tree.Entries
-	lastCommit := br.GetCommit()
-	for {
-		fmt.Println("Commit msg:", lastCommit.GetCommit().Message)
-		fmt.Println("")
-
-		break
+	for _, commit := range goodCommit.Parents {
+		grandParents, _ := findParentsOfCommit(ghs, commit, userName, repositoryName)
+		Parents = append(Parents, grandParents...)
 	}
 
-	message := br.GetCommit().Parents[0].GetMessage()
-	fmt.Println(message)
+	return Parents, fmt.Errorf("implement me")
+}
 
-	// for i := 0; i < len(parents); i++ {
-	// 	parent := parents[i]
-	// 	fmt.Println(parent)
-	// }
+func (ghs *gitHubService) GetBranchCommits(userName, repositoryName, branchName string) ([]*Commit, error) {
+	br, _, _ := ghs.client.Repositories.GetBranch(context.Background(), userName, repositoryName, branchName, true)
+	lastCommit := br.GetCommit().GetCommit()
 
-	return nil, err
+	commits, _ := findParentsOfCommit(ghs, lastCommit, userName, repositoryName) // пока что возвращает пустоту
+
+	var Commits []*Commit
+
+	for _, commit := range commits {
+		pr := Commit{
+			Hash:      commit.GetSHA(),
+			Title:     commit.GetMessage(),
+			CreatedAt: commit.GetAuthor().GetDate(),
+		}
+		Commits = append(Commits, &pr)
+
+	}
+
+	return Commits, fmt.Errorf("implement me")
+
 }
 
 func (ghs *gitHubService) GetRepositoryPullRequests(repositoryName string) ([]*PullRequest, error) { // <--- no username?
-	opts := github.PullRequestListOptions{}
+	opts := github.PullRequestListOptions{
+		State: "all",
+	}
 	pullRequests, _, _ := ghs.client.PullRequests.List(context.Background(), "google", repositoryName, &opts)
 
 	var PullRequests []*PullRequest
@@ -336,7 +365,7 @@ func (ghs *gitHubService) GetRepositoryPullRequests(repositoryName string) ([]*P
 			Title:        *request.Title,
 			SourceBranch: *request.Head.Ref,
 			TargetBranch: *request.Base.Ref,
-			IsClosed:     *request.Locked,
+			IsClosed:     *request.Locked, // это вообще то? выдаёт только false
 		}
 		PullRequests = append(PullRequests, &pr)
 
@@ -367,7 +396,7 @@ func (ghs *gitHubService) GetIssues(repositoryName string) ([]*Issue, error) { /
 
 		i := Issue{
 			Title:                   *issue.Title,
-			IsClosed:                *issue.Locked, // это вообще то?
+			IsClosed:                issue.GetLocked(), // это вообще то? выдаёт только false
 			ResolvedPullRequestLink: issue.GetPullRequestLinks().GetURL(),
 			CreatedAt:               *issue.CreatedAt,
 			UpdatedAt:               *issue.UpdatedAt,
@@ -391,7 +420,7 @@ func (ghs *gitHubService) GetRepositoryContributors(repositoryName string) ([]*U
 
 		i := User{
 			UserName:       user.GetLogin(),
-			FullName:       user.GetName(),
+			FullName:       user.GetName(), // works?
 			FollowersCount: id.GetFollowers(),
 			FollowingCount: id.GetFollowing(),
 		}
@@ -409,12 +438,20 @@ func (ghs *gitHubService) GetRepositoryTags(userName, repositoryName string) ([]
 	var Tags []*Tag
 
 	for _, tag := range tags {
+		// вырезаем SHA и по SHA ищем коммит
+
+		// url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/", userName, repositoryName) // вот тут ошибка потому что нам нужен не коммит
+		// sha := strings.Replace(*tag.Commit.URL, url, "", 1)
+		sha := *(tag.Commit.SHA)
+
+		goodTag, _, _ := ghs.client.Git.GetTag(context.Background(), userName, repositoryName, sha)
+
 		t := Tag{
-			Title:       *tag.Name,
-			Hash:        *tag.GetCommit().SHA,
-			Description: *tag.GetCommit().Message,
-			ZipLink:     *tag.ZipballURL,
-			CreatedAt:   *tag.Commit.GetAuthor().Date,
+			Title:       tag.GetName(),
+			Hash:        goodTag.GetSHA(),     // не работает
+			Description: goodTag.GetMessage(), // не работает
+			ZipLink:     tag.GetZipballURL(),
+			CreatedAt:   goodTag.GetTagger().GetDate(), // не работает
 		}
 		Tags = append(Tags, &t)
 
@@ -437,4 +474,130 @@ func (ghs *gitHubService) SetAccessToRepository(oppoUserName, repositoryName str
 
 func (ghs *gitHubService) DenyAccessToRepository(oppoUserName, repositoryName string) error {
 	return fmt.Errorf("implement me")
+}
+
+func main() {
+
+	// Authorizing a client
+	bruh := NewGitHubService(context.TODO())
+
+	// GetBranchCommits
+	fmt.Println("GetBranchCommits:")
+	commits, _ := bruh.GetBranchCommits("jostanise", "rsa_encrypted_local_chat", "main")
+
+	for _, commit := range commits {
+		fmt.Printf("\tTitle:\t\t %v\n", commit.Title)
+		fmt.Printf("\tHash:\t\t %v\n", commit.Hash)
+		fmt.Printf("\tCreatedAt:\t %v\n", commit.CreatedAt)
+		fmt.Println()
+
+	}
+	fmt.Println()
+
+	// GetUserInfo получает основную информацию о пользователе
+	user, _ := bruh.GetUserInfo("jostanise")
+	fmt.Println("GetUserInfo:")
+	fmt.Println("\tUserName:\t", user.UserName)
+	fmt.Println("\tFullName:\t", user.FullName)
+	fmt.Println("\tFollowersCount:\t", user.FollowersCount)
+	fmt.Println("\tFollowingCount:\t", user.FollowingCount)
+	fmt.Println()
+
+	// GetUserRepositories
+	fmt.Println("GetUserRepositories:")
+	repos, _ := bruh.GetUserRepositories("")
+	for i := 0; i < len(repos); i++ {
+		repo := repos[i]
+		fmt.Println("\tName:\t\t\t", repo.Name)
+		fmt.Println("\tDescription:\t\t", repo.Description)
+		fmt.Println("\tIsPrivate:\t\t", repo.IsPrivate)
+		fmt.Println("\tStarsCount:\t\t", repo.StarsCount)
+		fmt.Println("\tForksCount:\t\t", repo.ForksCount)
+		fmt.Println("\tLastUpdatedTime:\t", repo.LastUpdatedTime)
+		fmt.Println("\tprogrammingLanguage:\t", repo.programmingLanguage)
+		fmt.Println("\tLink:\t\t\t", repo.Link)
+		fmt.Println()
+	}
+	fmt.Println()
+
+	// GetRepositoryByName
+	fmt.Println("GetRepositoryByName:")
+	repo, _ := bruh.GetRepositoryByName("jostanise", "rsa_encrypted_local_chat")
+	fmt.Println("\tName:\t\t\t", repo.Name)
+	fmt.Println("\tLastUpdatedTime:\t", repo.LastUpdatedTime)
+	fmt.Println("\tprogrammingLanguage:\t", repo.programmingLanguage)
+	fmt.Println()
+
+	// GetRepositoryBranches
+	fmt.Println("GetRepositoryBranches:")
+	b, _ := bruh.GetRepositoryBranches("jostanise", "rsa_encrypted_local_chat")
+	for i := 0; i < len(b); i++ {
+		fmt.Println("\tBranch:", b[0].Name, "\tLast update:", b[0].UpdatedAt)
+	}
+	fmt.Println()
+
+	// GetRepositoryPullRequests
+	fmt.Println("GetRepositoryPullRequests:")
+	pullreqs, _ := bruh.GetRepositoryPullRequests("go-github")
+	for i := 0; i < len(pullreqs); i++ {
+		pr := pullreqs[i]
+		fmt.Println("\tID:\t\t", pr.ID)
+		fmt.Println("\tTitle:\t\t", pr.Title)
+		fmt.Println("\tSourceBranch:\t", pr.SourceBranch)
+		fmt.Println("\tTargetBranch:\t", pr.TargetBranch)
+		fmt.Println("\tIsClosed:\t", pr.IsClosed)
+		fmt.Println()
+	}
+	fmt.Println()
+
+	// GetThreadsInfo получает информацию об обсуждениях конкретного запроса на слияние
+
+	// GetIssues получает информацию об опубликованных проблемах репозитория
+	fmt.Println("GetIssues")
+	issues, _ := bruh.GetIssues("go-github")
+	for i := 0; i < len(issues); i++ {
+		issue := issues[i]
+		fmt.Println("\tTitle:\t\t\t", issue.Title)
+		fmt.Println("\tIsClosed:\t\t", issue.IsClosed)
+		fmt.Println("\tCreatedAt:\t\t", issue.CreatedAt)
+		fmt.Println("\tUpdatedAt:\t\t", issue.UpdatedAt)
+		fmt.Println("\tResolvedPullRequestLink:", issue.ResolvedPullRequestLink)
+		fmt.Println()
+	}
+	fmt.Println()
+
+	// GetRepositoryContributors получает список соавторов репозитория
+	fmt.Println("GetRepositoryContributors:")
+	contributors, _ := bruh.GetRepositoryContributors("go-github")
+	for i := 0; i < len(contributors); i++ {
+		contributor := contributors[i]
+		fmt.Println("\tUsername:\t", contributor.UserName)
+		fmt.Println("\tFullname:\t", contributor.FullName)
+		fmt.Println("\tFollowersCount:\t", contributor.FollowersCount)
+		fmt.Println("\tFollowingCount:\t", contributor.FollowingCount)
+		fmt.Println()
+	}
+	fmt.Println()
+
+	// GetRepositoryTags возвращает информацию о тегах репозитория
+	fmt.Println("GetRepositoryTags:")
+	tags, _ := bruh.GetRepositoryTags("google", "go-github")
+	for _, tag := range tags {
+		fmt.Println("\tTitle:\t\t", tag.Title)
+		fmt.Println("\tHash:\t\t", tag.Hash)
+		fmt.Println("\tDescription:\t", tag.Description)
+		fmt.Println("\tZipLink:\t", tag.ZipLink)
+		fmt.Println("\tCreatedAt:\t", tag.CreatedAt)
+		fmt.Println()
+	}
+
+	// CreateRepository создает репозиторий с указанным именем
+	// CreateBranch создает новую ветку
+	// DeleteBranch удаляет указанную ветку
+	// CreatePullRequest создает новый запрос на слияние
+	// CreateTag создает новый тег
+	// DeleteTag удаляет тег по имени
+	// SetAccessToRepository предоставляет доступ к репозиторию указанному пользователю
+	// DenyAccessToRepository закрывает доступ к репозиторию указанному пользователю
+
 }
