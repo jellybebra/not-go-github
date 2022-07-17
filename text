@@ -1,0 +1,14 @@
+query GetReviewThreads($owner: String!, $repo: String!, $number: Int!)
+    {repository(owner: $owner, name: $repo)
+        {pullRequest(number: $number)
+            {reviewThreads(first: 100)
+                {nodes
+                    {comments(first: 100)
+                        {nodes
+                            {bodyText}
+                        } isResolved
+                    }
+                }
+            }
+        }
+    }
