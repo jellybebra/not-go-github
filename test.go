@@ -57,9 +57,9 @@ func checkGetRepositoryByName(ghs GitServiceIFace) {
 
 func checkGetRepositoryBranches(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryBranches:")
-	b, _ := ghs.GetRepositoryBranches("jostanise", "rsa_encrypted_local_chat")
+	b, _ := ghs.GetRepositoryBranches("PeakIntegral", "cppLessons")
 	for i := 0; i < len(b); i++ {
-		fmt.Println("\tBranch:", b[0].Name, "\tLast update:", b[0].UpdatedAt)
+		fmt.Println("\tBranch:", b[i].Name, "\tLast update:", b[i].UpdatedAt)
 	}
 	fmt.Println()
 }
@@ -107,7 +107,7 @@ func checkGetRepositoryContributors(ghs GitServiceIFace) {
 
 func checkGetRepositoryTags(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryTags:")
-	tags, _ := ghs.GetRepositoryTags("google", "go-github")
+	tags, _ := ghs.GetRepositoryTags("jostanise", "rsa_encrypted_local_chat")
 	for _, tag := range tags {
 		fmt.Println("\tTitle:\t\t", tag.Title)
 		fmt.Println("\tHash:\t\t", tag.Hash)
