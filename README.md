@@ -13,7 +13,7 @@ ghs, err := NewGitHubService(context.TODO())
 contributors, err := ghs.GetRepositoryContributors("google", "go-github")
 ```
 ```go
-// Получить информацию о репозитории "jostanise/
+// Получить информацию о репозитории "jostanise/rsa_encrypted_local_chat"
 repo, err := ghs.GetRepositoryByName("jostanise", "rsa_encrypted_local_chat")
 ```
 
