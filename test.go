@@ -3,25 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
+
+	"github.com/joho/godotenv"
 )
 
-func checkGetBranchCommits(bruh GitServiceIFace) {
-
+func checkGetBranchCommits(ghs GitServiceIFace) {
 	fmt.Println("GetBranchCommits:")
-	commits, _ := bruh.GetBranchCommits("jostanise", "rsa_encrypted_local_chat", "main")
-
+	commits, _ := ghs.GetBranchCommits("jostanise", "rsa_encrypted_local_chat", "main")
 	for _, commit := range commits {
 		fmt.Printf("\tTitle:\t\t %v\n", commit.Title)
 		fmt.Printf("\tHash:\t\t %v\n", commit.Hash)
 		fmt.Printf("\tCreatedAt:\t %v\n", commit.CreatedAt)
 		fmt.Println()
-
 	}
 	fmt.Println()
 }
 
-func checkGetUserInfo(bruh GitServiceIFace) {
-	user, _ := bruh.GetUserInfo("jostanise")
+func checkGetUserInfo(ghs GitServiceIFace) {
+	user, _ := ghs.GetUserInfo("jostanise")
 	fmt.Println("GetUserInfo:")
 	fmt.Println("\tUserName:\t", user.UserName)
 	fmt.Println("\tFullName:\t", user.FullName)
@@ -30,11 +29,10 @@ func checkGetUserInfo(bruh GitServiceIFace) {
 	fmt.Println()
 }
 
-func checkGetUserRepositories(bruh GitServiceIFace) {
+func checkGetUserRepositories(ghs GitServiceIFace) {
 	fmt.Println("GetUserRepositories:")
-	repos, _ := bruh.GetUserRepositories("")
-	for i := 0; i < len(repos); i++ {
-		repo := repos[i]
+	repos, _ := ghs.GetUserRepositories("")
+	for _, repo := range repos {
 		fmt.Println("\tName:\t\t\t", repo.Name)
 		fmt.Println("\tDescription:\t\t", repo.Description)
 		fmt.Println("\tIsPrivate:\t\t", repo.IsPrivate)
@@ -48,29 +46,28 @@ func checkGetUserRepositories(bruh GitServiceIFace) {
 	fmt.Println()
 }
 
-func checkGetRepositoryByName(bruh GitServiceIFace) {
+func checkGetRepositoryByName(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryByName:")
-	repo, _ := bruh.GetRepositoryByName("jostanise", "rsa_encrypted_local_chat")
+	repo, _ := ghs.GetRepositoryByName("jostanise", "rsa_encrypted_local_chat")
 	fmt.Println("\tName:\t\t\t", repo.Name)
 	fmt.Println("\tLastUpdatedTime:\t", repo.LastUpdatedTime)
 	fmt.Println("\tprogrammingLanguage:\t", repo.programmingLanguage)
 	fmt.Println()
 }
 
-func checkGetRepositoryBranches(bruh GitServiceIFace) {
+func checkGetRepositoryBranches(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryBranches:")
-	b, _ := bruh.GetRepositoryBranches("jostanise", "rsa_encrypted_local_chat")
+	b, _ := ghs.GetRepositoryBranches("jostanise", "rsa_encrypted_local_chat")
 	for i := 0; i < len(b); i++ {
 		fmt.Println("\tBranch:", b[0].Name, "\tLast update:", b[0].UpdatedAt)
 	}
 	fmt.Println()
 }
 
-func checkGetRepositoryPullRequests(bruh GitServiceIFace) {
+func checkGetRepositoryPullRequests(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryPullRequests:")
-	pullreqs, _ := bruh.GetRepositoryPullRequests("go-github")
-	for i := 0; i < len(pullreqs); i++ {
-		pr := pullreqs[i]
+	prs, _ := ghs.GetRepositoryPullRequests("google", "go-github")
+	for _, pr := range prs {
 		fmt.Println("\tID:\t\t", pr.ID)
 		fmt.Println("\tTitle:\t\t", pr.Title)
 		fmt.Println("\tSourceBranch:\t", pr.SourceBranch)
@@ -81,11 +78,10 @@ func checkGetRepositoryPullRequests(bruh GitServiceIFace) {
 	fmt.Println()
 }
 
-func checkGetIssues(bruh GitServiceIFace) {
+func checkGetIssues(ghs GitServiceIFace) {
 	fmt.Println("GetIssues")
-	issues, _ := bruh.GetIssues("google", "go-github")
-	for i := 0; i < len(issues); i++ {
-		issue := issues[i]
+	issues, _ := ghs.GetIssues("google", "go-github")
+	for _, issue := range issues {
 		fmt.Println("\tTitle:\t\t\t", issue.Title)
 		fmt.Println("\tIsClosed:\t\t", issue.IsClosed)
 		fmt.Println("\tCreatedAt:\t\t", issue.CreatedAt)
@@ -96,11 +92,10 @@ func checkGetIssues(bruh GitServiceIFace) {
 	fmt.Println()
 }
 
-func checkGetRepositoryContributors(bruh GitServiceIFace) {
+func checkGetRepositoryContributors(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryContributors:")
-	contributors, _ := bruh.GetRepositoryContributors("google", "go-github")
-	for i := 0; i < len(contributors); i++ {
-		contributor := contributors[i]
+	contributors, _ := ghs.GetRepositoryContributors("google", "go-github")
+	for _, contributor := range contributors {
 		fmt.Println("\tUsername:\t", contributor.UserName)
 		fmt.Println("\tFullname:\t", contributor.FullName)
 		fmt.Println("\tFollowersCount:\t", contributor.FollowersCount)
@@ -110,9 +105,9 @@ func checkGetRepositoryContributors(bruh GitServiceIFace) {
 	fmt.Println()
 }
 
-func checkGetRepositoryTags(bruh GitServiceIFace) {
+func checkGetRepositoryTags(ghs GitServiceIFace) {
 	fmt.Println("GetRepositoryTags:")
-	tags, _ := bruh.GetRepositoryTags("google", "go-github")
+	tags, _ := ghs.GetRepositoryTags("google", "go-github")
 	for _, tag := range tags {
 		fmt.Println("\tTitle:\t\t", tag.Title)
 		fmt.Println("\tHash:\t\t", tag.Hash)
@@ -124,31 +119,33 @@ func checkGetRepositoryTags(bruh GitServiceIFace) {
 }
 
 func main() {
+	// Load token
+	godotenv.Load(".env")
 
 	// Authorizing a client
-	bruh := NewGitHubService(context.TODO())
+	ghs, _ := NewGitHubService(context.Background())
 
-	// checkGetBranchCommits(bruh)
-	// checkGetUserInfo(bruh)
-	// checkGetUserRepositories(bruh)
-	// checkGetRepositoryByName(bruh)
-	// checkGetRepositoryBranches(bruh)
-	// checkGetRepositoryPullRequests(bruh)
-	// checkGetIssues(bruh)
-	// checkGetRepositoryContributors(bruh)
-	// checkGetRepositoryTags(bruh)
+	// Get info
+	checkGetUserRepositories(ghs)
+	checkGetBranchCommits(ghs)
+	checkGetUserInfo(ghs)
+	checkGetRepositoryByName(ghs)
+	checkGetRepositoryBranches(ghs)
+	checkGetRepositoryPullRequests(ghs)
+	checkGetIssues(ghs)
+	checkGetRepositoryContributors(ghs)
+	checkGetRepositoryTags(ghs)
 
-	// bruh.CreateBranch("jostanise", "rsa_encrypted_local_chat", "testbruh", "0480a292df58ba0bb4851bf828ed25efc56da813")
-	// bruh.DeleteBranch("jostanise", "rsa_encrypted_local_chat", "testbruh")
-	// bruh.CreateTag("jostanise", "rsa_encrypted_local_chat", "bruh", "0480a292df58ba0bb4851bf828ed25efc56da813")
-	// bruh.DeleteTag("jostanise", "rsa_encrypted_local_chat", "bruh")
-	// bruh.CreateRepository("bruuuh")
-	// bruh.SetAccessToRepository("jostanise", "bruevich", "PeakIntegral")
-	// bruh.DenyAccessToRepository("jostanise", "bruevich", "PeakIntegral")
+	// No output
+	ghs.CreateBranch("jostanise", "rsa_encrypted_local_chat", "tessst", "0480a292df58ba0bb4851bf828ed25efc56da813")
+	ghs.DeleteBranch("jostanise", "rsa_encrypted_local_chat", "tessst")
+	ghs.CreateTag("jostanise", "rsa_encrypted_local_chat", "tessst", "0480a292df58ba0bb4851bf828ed25efc56da813")
+	ghs.DeleteTag("jostanise", "rsa_encrypted_local_chat", "tessst")
+	ghs.CreateRepository("tessst")
+	ghs.SetAccessToRepository("jostanise", "bruevich", "PeakIntegral")
+	ghs.DenyAccessToRepository("jostanise", "bruevich", "PeakIntegral")
+	ghs.CreatePullRequest("jostanise", "rsa_encrypted_local_chat", "tessst", "main", "tesst_to_main")
 
-	err := bruh.CreatePullRequest("jostanise", "rsa_encrypted_local_chat", "testbruh", "main", "testy besty")
-	fmt.Printf("err: %v\n", err)
-
-	// bruh.GetThreadsInfo("google", "go-github", 0)
-
+	// Not implemented
+	// ghs.GetThreadsInfo("google", "go-github", 0)
 }
