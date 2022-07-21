@@ -18,9 +18,8 @@ repo, err := ghs.GetRepositoryByName("jostanise", "rsa_encrypted_local_chat")
 ```
 
 
-# Ограничения доступа к GitHub API
+# Тестирование ограничений доступа к GitHub API
 
-## Тестирование
 ### Тестирование с токеном
 ```go
 // Используем токен доступа, поместив его в файл .env

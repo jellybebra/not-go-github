@@ -118,6 +118,17 @@ func checkGetRepositoryTags(ghs GitServiceIFace) {
 	}
 }
 
+func checkGetThreadsInfo(ghs GitServiceIFace) {
+	fmt.Println("GetThreadsInfo:")
+	threads, _ := ghs.GetThreadsInfo("google", "go-github", 2403)
+	for _, thread := range threads {
+		fmt.Println("\tFilename:\t\t", thread.Filename)
+		fmt.Println("\tLineOfCode:\t\t", thread.LineOfCode)
+		fmt.Println("\tComments:\t\t", thread.Comments)
+		fmt.Println()
+	}
+}
+
 func main() {
 	// Load token
 	godotenv.Load(".env")
@@ -135,6 +146,7 @@ func main() {
 	checkGetIssues(ghs)
 	checkGetRepositoryContributors(ghs)
 	checkGetRepositoryTags(ghs)
+	checkGetThreadsInfo(ghs)
 
 	// No output
 	ghs.CreateBranch("jostanise", "rsa_encrypted_local_chat", "tessst", "0480a292df58ba0bb4851bf828ed25efc56da813")
@@ -145,7 +157,4 @@ func main() {
 	ghs.SetAccessToRepository("jostanise", "bruevich", "PeakIntegral")
 	ghs.DenyAccessToRepository("jostanise", "bruevich", "PeakIntegral")
 	ghs.CreatePullRequest("jostanise", "rsa_encrypted_local_chat", "tessst", "main", "tesst_to_main")
-
-	// Not implemented
-	// ghs.GetThreadsInfo("google", "go-github", 0)
 }

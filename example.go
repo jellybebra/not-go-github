@@ -64,7 +64,9 @@ type PullRequest struct {
 }
 
 type Thread struct {
-	IsResolved bool // Закрытое или открытое обсуждение
+	Filename   string   // имя файла из пулл реквеста, под которым комментарии
+	LineOfCode uint64   // Номер строки, под которой оставлены комментарии
+	Comments   []string // Сообщения из комментариев (история переписки)
 }
 
 type Tag struct {
@@ -89,7 +91,7 @@ type GitServiceIFace interface {
 	CreateRepository(repositoryName string) error
 
 	// GetRepositoryBranches получает список всех веток репозитория
-	GetRepositoryBranches(owner, repositoryName string) ([]*Branch, error)
+	GetRepositoryBranches(userName, repositoryName string) ([]*Branch, error)
 
 	// CreateBranch создает новую ветку
 	CreateBranch(userName, repoName, branchName, sha string) error
@@ -151,11 +153,16 @@ func NewGitHubService(ctx context.Context) (GitServiceIFace, error) {
 	return &gitHubService{client: client}, nil
 }
 
-func getLanguages(rpGH *github.Repository, ghs *gitHubService) ([]struct {
+const (
+	commitsURL    = "https://api.github.com/repos/%s/%s/commits/"
+	gitCommitsURL = "https://api.github.com/repos/%s/%s/git/commits/"
+)
+
+func getLanguages(gitHubRepo *github.Repository, ghs *gitHubService) ([]struct {
 	Name           string
 	PercentOfUsage float64
 }, error) {
-	languages, _, err := ghs.client.Repositories.ListLanguages(context.Background(), rpGH.GetOwner().GetLogin(), rpGH.GetName())
+	languages, _, err := ghs.client.Repositories.ListLanguages(context.Background(), gitHubRepo.GetOwner().GetLogin(), gitHubRepo.GetName())
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +193,7 @@ func getLanguages(rpGH *github.Repository, ghs *gitHubService) ([]struct {
 
 func findParentsOfCommit(ghs *gitHubService, commit *github.Commit, userName string, repositoryName string) ([]*github.Commit, error) {
 	// Вырезаем SHA и по SHA ищем коммит (попробовать переделать)
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/commits/", userName, repositoryName)
+	url := fmt.Sprintf(gitCommitsURL, userName, repositoryName)
 	sha := strings.Replace(commit.GetURL(), url, "", 1)
 	goodCommit, _, err := ghs.client.Git.GetCommit(context.Background(), userName, repositoryName, sha)
 	if err != nil {
@@ -233,7 +240,6 @@ func (ghs *gitHubService) GetUserInfo(userName string) (*User, error) {
 func (ghs *gitHubService) GetUserRepositories(userName string) ([]*Repository, error) {
 	opts := github.RepositoryListOptions{}
 
-	// УБРАТЬ ПОТОМ
 	repos, _, err := ghs.client.Repositories.List(context.Background(), userName, &opts)
 	if err != nil {
 		return nil, fmt.Errorf("list user repos: %w", err)
@@ -243,7 +249,7 @@ func (ghs *gitHubService) GetUserRepositories(userName string) ([]*Repository, e
 	for _, r := range repos {
 		langs, err := getLanguages(r, ghs)
 		if err != nil {
-			return nil, fmt.Errorf("GetUserRepositories: %w", err)
+			return nil, fmt.Errorf("get languages: %w", err)
 		}
 
 		repo := Repository{
@@ -303,8 +309,9 @@ func (ghs *gitHubService) GetRepositoryBranches(owner, repositoryName string) ([
 
 	var Branches []*Branch
 	for _, branch := range branches {
-		badCommit := branch.GetCommit() // returns "broken" UpdatedAt field
-		url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/", owner, repositoryName)
+		badCommit := branch.GetCommit()
+		// badCommit.GetAuthor().GetDate() returns 0001-01-01 00:00:00 +0000 UTC
+		url := fmt.Sprintf(commitsURL, owner, repositoryName)
 		sha := strings.Replace(badCommit.GetURL(), url, "", 1)
 
 		goodCommit, _, err := ghs.client.Git.GetCommit(context.Background(), owner, repositoryName, sha)
@@ -344,13 +351,13 @@ func (ghs *gitHubService) DeleteBranch(userName, repoName, branchName string) er
 func (ghs *gitHubService) GetBranchCommits(userName, repositoryName, branchName string) ([]*Commit, error) {
 	br, _, err := ghs.client.Repositories.GetBranch(context.Background(), userName, repositoryName, branchName, true)
 	if err != nil {
-		return nil, fmt.Errorf("GetBranchCommits: %w", err)
+		return nil, fmt.Errorf("get branch: %w", err)
 	}
 
 	lastCommit := br.GetCommit().GetCommit()
 	commits, err := findParentsOfCommit(ghs, lastCommit, userName, repositoryName)
 	if err != nil {
-		return nil, fmt.Errorf("GetBranchCommits: %w", err)
+		return nil, fmt.Errorf("find parents of commit: %w", err)
 	}
 
 	var Commits []*Commit
@@ -394,14 +401,89 @@ func (ghs *gitHubService) CreatePullRequest(userName, repoName, sourceBranch, de
 	return err
 }
 
-func (ghs *gitHubService) GetThreadsInfo(userName, repositoryName string, pullRequestID int) ([]*Thread, error) { // must use GraphQL
-	// REST API doesn't give "IsResolved" info
-	// https://github.community/t/resolve-a-pr-review-comment-through-api/254182
-	// https://github.com/shurcooL/githubv4
-	// https://docs.github.com/en/graphql/overview/about-the-graphql-api
-	// https://docs.github.com/en/graphql/reference/objects#repository
+func (ghs *gitHubService) GetThreadsInfo(userName, repositoryName string, pullRequestID int) ([]*Thread, error) {
+	// Речь точно идёт НЕ о Issues: issues это комменты, под которыми нельзя другие комменты оставить
 
-	return nil, fmt.Errorf("function is not implemented")
+	opts := github.ListOptions{}
+	reviews, _, err := ghs.client.PullRequests.ListReviews(context.Background(), userName, repositoryName, pullRequestID, &opts)
+	if err != nil {
+		return nil, fmt.Errorf("list reviews: %w", err)
+	}
+
+	var AllThreads []*Thread
+
+	for _, review := range reviews {
+		opts := github.ListOptions{}
+		comments, _, err := ghs.client.PullRequests.ListReviewComments(context.Background(), userName, repositoryName, pullRequestID, review.GetID(), &opts)
+		if err != nil {
+			return nil, fmt.Errorf("list review comments: %w", err)
+		}
+
+		type Comment struct {
+			FileName   string
+			LineOfCode uint64
+			Message    string
+		}
+		var AllComments []Comment
+
+		FileNames := make(map[string]struct{})
+
+		for _, comment := range comments {
+			c := Comment{
+				FileName:   comment.GetPath(),
+				LineOfCode: uint64(comment.GetLine()), // не то
+				Message:    comment.GetBody(),
+			}
+			AllComments = append(AllComments, c)
+			FileNames[comment.GetPath()] = struct{}{}
+		}
+
+		// Соберём все номера строк для каждого файла
+		type FileLines struct {
+			FileName string
+			Lines    map[uint64]struct{}
+		}
+		var LinesForFiles []FileLines
+
+		for f := range FileNames {
+			lines := make(map[uint64]struct{})
+
+			for _, comment := range AllComments {
+				if comment.FileName == f {
+					lines[comment.LineOfCode] = struct{}{}
+				}
+			}
+
+			lfl := FileLines{
+				FileName: f,
+				Lines:    lines,
+			}
+			LinesForFiles = append(LinesForFiles, lfl)
+		}
+
+		var Threads []*Thread
+
+		for _, f := range LinesForFiles {
+			for line := range f.Lines {
+				var comments []string
+				for _, comment := range AllComments {
+					if (comment.FileName == f.FileName) && (comment.LineOfCode == line) {
+						comments = append(comments, comment.Message)
+					}
+				}
+
+				t := Thread{
+					Filename:   f.FileName,
+					LineOfCode: line,
+					Comments:   comments,
+				}
+				Threads = append(Threads, &t)
+			}
+		}
+		AllThreads = append(AllThreads, Threads...)
+	}
+
+	return AllThreads, nil
 }
 
 func (ghs *gitHubService) GetIssues(userName, repositoryName string) ([]*Issue, error) {
@@ -468,7 +550,7 @@ func (ghs *gitHubService) GetRepositoryTags(userName, repositoryName string) ([]
 
 		t := Tag{
 			Title:       tag.GetName(),
-			Hash:        tag.GetCommit().GetSHA(), // оно?
+			Hash:        tag.GetCommit().GetSHA(),
 			Description: *release.Body,
 			ZipLink:     tag.GetZipballURL(),
 			CreatedAt:   release.GetCreatedAt().Time,
