@@ -402,8 +402,6 @@ func (ghs *gitHubService) CreatePullRequest(userName, repoName, sourceBranch, de
 }
 
 func (ghs *gitHubService) GetThreadsInfo(userName, repositoryName string, pullRequestID int) ([]*Thread, error) {
-	// Речь точно идёт НЕ о Issues: issues это комменты, под которыми нельзя другие комменты оставить
-
 	opts := github.ListOptions{}
 	reviews, _, err := ghs.client.PullRequests.ListReviews(context.Background(), userName, repositoryName, pullRequestID, &opts)
 	if err != nil {
@@ -412,7 +410,7 @@ func (ghs *gitHubService) GetThreadsInfo(userName, repositoryName string, pullRe
 
 	var AllThreads []*Thread
 
-	for _, review := range reviews {
+	for _, review := range reviews { // оказывается reviews делится по людям
 		opts := github.ListOptions{}
 		comments, _, err := ghs.client.PullRequests.ListReviewComments(context.Background(), userName, repositoryName, pullRequestID, review.GetID(), &opts)
 		if err != nil {
@@ -429,13 +427,19 @@ func (ghs *gitHubService) GetThreadsInfo(userName, repositoryName string, pullRe
 		FileNames := make(map[string]struct{})
 
 		for _, comment := range comments {
+			// comment.GetOriginalLine() возвращает 0
+			goodComment, _, err := ghs.client.PullRequests.GetComment(context.Background(), userName, repositoryName, comment.GetID())
+			if err != nil {
+				return nil, fmt.Errorf("get comment: %w", err)
+			}
+
 			c := Comment{
-				FileName:   comment.GetPath(),
-				LineOfCode: uint64(comment.GetLine()), // не то
-				Message:    comment.GetBody(),
+				FileName:   goodComment.GetPath(),
+				LineOfCode: uint64(goodComment.GetOriginalLine()),
+				Message:    goodComment.GetBody(),
 			}
 			AllComments = append(AllComments, c)
-			FileNames[comment.GetPath()] = struct{}{}
+			FileNames[c.FileName] = struct{}{}
 		}
 
 		// Соберём все номера строк для каждого файла

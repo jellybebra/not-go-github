@@ -124,7 +124,9 @@ func checkGetThreadsInfo(ghs GitServiceIFace) {
 	for _, thread := range threads {
 		fmt.Println("\tFilename:\t\t", thread.Filename)
 		fmt.Println("\tLineOfCode:\t\t", thread.LineOfCode)
-		fmt.Println("\tComments:\t\t", thread.Comments)
+		for i, comment := range thread.Comments {
+			fmt.Printf("\tComment %v:\t\t%v\n", i, comment)
+		}
 		fmt.Println()
 	}
 }
